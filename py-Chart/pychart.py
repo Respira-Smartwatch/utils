@@ -37,10 +37,10 @@ class PyChart(QtWidgets.QMainWindow):
         self.resize(self.width, self.height)
 
         # Create Layouts
-        main_layout = QtWidgets.QHBoxLayout()
-        graph_layout = QtWidgets.QVBoxLayout()
-        sidebar_layout = QtWidgets.QVBoxLayout()
-        p_layouts = [QtWidgets.QHBoxLayout() for _ in range(self.num_graphs)]
+        self.main_layout = QtWidgets.QHBoxLayout()
+        self.graph_layout = QtWidgets.QVBoxLayout()
+        self.sidebar_layout = QtWidgets.QVBoxLayout()
+        self.p_layouts = [QtWidgets.QHBoxLayout() for _ in range(self.num_graphs)]
 
 
         # Initialize and connect Widgets ------------------------------------ 
@@ -72,28 +72,28 @@ class PyChart(QtWidgets.QMainWindow):
 
         # Layout population -------------------------------------------
         # Populate Main Layout : Grid layout houses a vertical layout
-        main_layout.addLayout(graph_layout)
-        main_layout.addLayout(sidebar_layout)
+        self.main_layout.addLayout(self.graph_layout)
+        self.main_layout.addLayout(self.sidebar_layout)
 
         # Populate the graph layout (Graphs and file selection)
         for idx, graph in enumerate(self.graphWidgets):
-            graph_layout.addWidget(graph)
-            graph_layout.addLayout(p_layouts[idx])
+            self.graph_layout.addWidget(graph)
+            self.graph_layout.addLayout(self.p_layouts[idx])
 
         #  Populate Vertical Layout
-        for idx, l in enumerate(p_layouts):
+        for idx, l in enumerate(self.p_layouts):
             l.addWidget(self.chooseFileButtons[idx])
             l.addWidget(self.fileLabels[idx])
 
         #sidebar_layout.addWidget(self.plotFileLoc)
-        sidebar_layout.addWidget(self.plotButton)
+        self.sidebar_layout.addWidget(self.plotButton)
         #sidebar_layout.addWidget(self.saveFileLoc)
-        sidebar_layout.addWidget(self.mockButton)
+        self.sidebar_layout.addWidget(self.mockButton)
 
         # Dummy widget - layout application --------------------------------- 
         # Create and utilize dummy widget (have to apply layout to dummy)
         widget = QtWidgets.QWidget()
-        widget.setLayout(main_layout)
+        widget.setLayout(self.main_layout)
         self.setCentralWidget(widget)
 
         # PlaceHolder data types: not necessary here TODO: Remove?
@@ -136,6 +136,20 @@ class PyChart(QtWidgets.QMainWindow):
         self.timer.setInterval(self.sample_T_ms)  # Set the timer interval
         self.timer.timeout.connect(self.update_plot_data)   # Set timeout behaviour
         self.timer.start()                                  # Start timer
+
+
+    # TODO: FINISH THIS!!
+    def create_graph_view(self, pnum:int):
+        g = pg.PlotWidget()
+        btn = QtWidgets.QPushButton("Browse")  
+        btn.setMaximumWidth(S_BTN_WID)
+        btn.clicked.connect(lambda ch, i=pnum: self.file_button_pressed(i))
+        label = QtWidgets.QLabel("None")
+
+        layout = QtWidgets.QHBoxLayout() 
+        layout.addWidget()
+        self.p_layouts.append(QtWidgets.QHBoxLayout())
+
 
 
     def plot_button_pressed(self):

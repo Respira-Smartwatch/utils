@@ -1,6 +1,7 @@
 from PyQt5 import QtWidgets, QtCore, QtGui
 import pyqtgraph as pg
 from random import randint
+import serial
 import sys  # We need sys so that we can pass argv to QApplication
 import os
 
@@ -8,7 +9,7 @@ S_BTN_WID = 75 # Setting up a global parameter for button width
 
 class PyChart(QtWidgets.QMainWindow):
 
-    def __init__(self, n_g=1, f_s=20, *args, **kwargs):
+    def __init__(self, n_g=1, f_s=20, serial_dev="/dev/ttyUSB0", *args, **kwargs):
         """Standard init function. Sets some variables 
            Specify number of desired graphs with the n_g parameter"""
 
@@ -20,6 +21,7 @@ class PyChart(QtWidgets.QMainWindow):
         self.num_graphs=0
         self.sample_rate_hz = f_s
         self.sample_T_ms = int(1000 / f_s)
+        self.bus = serial.Serial(port=serial_dev, baudrate=9600, timeout=self.sample_T_ms/1000)
 
         # Setup for modifiable layouts
         self.chart_bottom_layouts = []
@@ -225,16 +227,21 @@ class PyChart(QtWidgets.QMainWindow):
     # TODO: Mess with this and allow live plotting!
     def live_plot_update(self):
         """The main function for live drawing: At the moment utilizes random data"""
-        self.x = self.x[1:]
-        self.x.append(self.x[-1] + 1)
 
-        self.y = self.y[1:]
-        self.y2 = self.y2[1:]
-        self.y.append(randint(0,100))
-        self.y2.append(randint(0,100))
+        data = int.from_bytes(self.bus.read(1), 'little')
 
-        self.data_line.setData(self.x, self.y)
-        self.data_line2.setData(self.x, self.y2)
+        if data > 0:
+            self.x = self.x[1:]
+            self.x.append(self.x[-1] + 1)
+            self.y = self.y[1:]
+            self.y2 = self.y2[1:]
+            print(data)
+            data = int(data)
+            self.y.append(data)
+            self.y2.append(0)
+            self.data_line.setData(self.x, self.y)
+            self.data_line2.setData(self.x, self.y2)
+        
 
 
 

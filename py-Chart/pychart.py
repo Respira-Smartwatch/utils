@@ -1,4 +1,5 @@
 from PyQt5 import QtWidgets, QtCore, QtGui
+import numpy as np
 import pyqtgraph as pg
 from random import randint
 import serial
@@ -21,7 +22,13 @@ class PyChart(QtWidgets.QMainWindow):
         self.num_graphs=0
         self.sample_rate_hz = f_s
         self.sample_T_ms = int(1000 / f_s)
-        self.bus = serial.Serial(port=serial_dev, baudrate=9600, timeout=self.sample_T_ms/1000)
+        self.wtc = True                     # Want to connect a serial device?
+        try:
+            self.bus = serial.Serial(port=serial_dev, baudrate=9600, timeout=self.sample_T_ms/1000)
+        except serial.SerialException:
+            print("Error: Serial Bus Not Present")
+            self.bus = 0
+            self.connect_serial_cli()
 
         # Setup for modifiable layouts
         self.chart_bottom_layouts = []
@@ -92,8 +99,17 @@ class PyChart(QtWidgets.QMainWindow):
         self.setup_graph_data()
 
         # pen is the line creation method: decides plot colors
+        self.pens = []
         self.red_pen = pg.mkPen(color=(255,0,0))    
         self.blue_pen = pg.mkPen(color=(0,0,255))
+        self.green_pen = pg.mkPen(color=(0,255,0))
+        self.purple_pen = pg.mkPen(color=(255,0,255))
+        self.cyan_pen = pg.mkPen(color=(0,255, 255))
+        self.pens.append(self.red_pen)
+        self.pens.append(self.blue_pen)
+        self.pens.append(self.green_pen)
+        self.pens.append(self.purple_pen)
+        self.pens.append(self.cyan_pen)
 
         # PLOTTING - TODO: Put this in its own method
 
@@ -105,7 +121,8 @@ class PyChart(QtWidgets.QMainWindow):
         self.timer = QtCore.QTimer()                        # Initialize a timer
         self.timer.setTimerType(QtCore.Qt.PreciseTimer)
         self.timer.setInterval(self.sample_T_ms)  # Set the timer interval
-        self.timer.timeout.connect(self.live_plot_update)   # Set timeout behaviour
+        if self.bus:
+            self.timer.timeout.connect(self.live_plot_update)   # Set timeout behaviour
         self.timer.start()                                  # Start timer
 
 
@@ -177,6 +194,7 @@ class PyChart(QtWidgets.QMainWindow):
         else:
             print("No File Selected")
             lbl_str = "No File Selected"
+            filenames = "None"
 
         self.fileLabels[g_id].setText(lbl_str)
         print("choose file pressed")
@@ -196,8 +214,9 @@ class PyChart(QtWidgets.QMainWindow):
         graph.setTitle(name, color=col, size=sz)
 
     # TODO: Make this read multiple filetypes
-    # TODO: Make this accept files with two columns x and y
     # TODO: Create Error handling dialogues
+    # DONE: Make this accept files with two (NOW FIVE)  columns x and y
+    # DONE: Allow first column to be X values
     def read_file(self, file, add_x=True):
         """ A Function that reads a file, and returns x and y lists 
             Currently only supports files with numbers on newlines."""
@@ -205,12 +224,22 @@ class PyChart(QtWidgets.QMainWindow):
         with open(file, 'r') as f:
             dat = f.read()
         
-        y = [float(x) for x in dat.strip().split('\n')]
+        data = [[float(g) for g in x.split(',')] for x in dat.strip().split('\n')]
         
+        if len(data[0]) >= 5:
+            print("Currently PyChart Cannot handle more than 5 input columns")
+            print("Only the first five data columns will be seen!!")
+
         if add_x:
-            x = [i for i in range(0,len(y))]
-        
-        return x, y
+            x = [i for i in range(0,len(data))]
+        else:
+            x = [line[0] for line in data]
+            data = [line[1:] for line in data]
+
+        out_data = np.array(data)
+        out_data = out_data.transpose()
+
+        return x, out_data.tolist()
 
 
     def plot_static(self, g_id:int, inFile:str, isolate=True):
@@ -219,15 +248,44 @@ class PyChart(QtWidgets.QMainWindow):
         if isolate:
             self.graphWidgets[g_id].clear()
         # Pull Data from file (supported files?)
-        x, y = self.read_file(inFile)
+        x, data = self.read_file(inFile)
         # Plot the data
-        self.graphWidgets[g_id].plot(x, y, pen=self.red_pen)
+        for idx, source in enumerate(data):
+            self.graphWidgets[g_id].plot(x, source, pen=self.pens[idx])
 
-
+    def connect_serial_cli(self):
+        print("No serial bus present\n\nWould you like to connect to a bus?")
+        while True:
+            ans = input("y/n:")
+            if ans.lower() not in ["y", "n"]:
+                print("Please enter 'y' or 'n'")
+                continue
+            elif ans.lower() == "n":
+                self.bus = 0
+                self.wtc = False
+                return 0
+            else:
+                ser = input("Enter path to serial bus:")
+            try:
+                self.bus = serial.Serial(port=ser, baudrate=9600, timeout=self.sample_T_ms/1000)
+            except serial.SerialException:
+                print(f"bus: '{ser}' is not a valid serial bus.")
+                ans = input("Try again? (y/n):").lower().strip()
+                if ans != "y":
+                    print("Continuing without a serial bus")
+                    self.bus = 0
+                    self.wtc = False
+                    return 0
+                continue
+    
     # TODO: Mess with this and allow live plotting!
     def live_plot_update(self):
         """The main function for live drawing: At the moment utilizes random data"""
-
+        if not ser:
+            print("No Live Plotting Available (No Serial Present)")
+            return
+            
+                
         data = int.from_bytes(self.bus.read(1), 'little')
 
         if data > 0:

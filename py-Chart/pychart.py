@@ -24,7 +24,7 @@ class PyChart(QtWidgets.QMainWindow):
         self.sample_T_ms = int(1000 / f_s)
         self.wtc = True                     # Want to connect a serial device?
         try:
-            self.bus = serial.Serial(port=serial_dev, baudrate=115200, timeout=self.sample_T_ms/1000)
+            self.bus = serial.Serial(port=serial_dev, baudrate=9600, timeout=self.sample_T_ms/1000)
         except serial.SerialException:
             print("Error: Serial Bus Not Present")
             self.bus = 0
@@ -278,7 +278,8 @@ class PyChart(QtWidgets.QMainWindow):
                     return 0
                 continue
     
-    # TODO: Mess with this and allow live plotting!
+    # DONE: Mess with this and allow live plotting!
+    # TODO: Generalize this and allow multiple plotting streams!
     def live_plot_update(self):
         """The main function for live drawing: At the moment utilizes random data"""
         if not self.bus:
@@ -286,8 +287,10 @@ class PyChart(QtWidgets.QMainWindow):
             return
             
                 
-        data = int.from_bytes(self.bus.read(1), 'little')
-
+        #data = int.from_bytes(self.bus.read(1), 'little')
+        data = str(self.bus.readline()).strip().split(',')
+        print(data)
+        data = int(data[0][2:-1])
         if data > 0:
             self.x = self.x[1:]
             self.x.append(self.x[-1] + 1)

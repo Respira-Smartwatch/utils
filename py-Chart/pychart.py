@@ -288,9 +288,9 @@ class PyChart(QtWidgets.QMainWindow):
             
                 
         #data = int.from_bytes(self.bus.read(1), 'little')
-        data = str(self.bus.readline()).strip().split(',')
+        data = str(self.bus.readline().decode()).strip().split(',')
         print(data)
-        data = float(data[0][2:-1])
+        data = float(data[0])
         if data > 0:
             self.x = self.x[1:]
             self.x.append(self.x[-1] + 1)

@@ -214,6 +214,7 @@ class PyChart(QtWidgets.QMainWindow):
         graph.setTitle(name, color=col, size=sz)
 
     # TODO: Make this read multiple filetypes
+    # TODO: Make this accept files with two columns x and y
     # TODO: Create Error handling dialogues
     # DONE: Make this accept files with two (NOW FIVE)  columns x and y
     # DONE: Allow first column to be X values
@@ -221,26 +222,35 @@ class PyChart(QtWidgets.QMainWindow):
         """ A Function that reads a file, and returns x and y lists 
             Currently only supports files with numbers on newlines."""
 
-        with open(file, 'r') as f:
-            dat = f.read()
-        
-        data = [[float(g) for g in x.split(',')] for x in dat.strip().split('\n')]
-        
-        if len(data[0]) >= 5:
-            print("Currently PyChart Cannot handle more than 5 input columns")
-            print("Only the first five data columns will be seen!!")
+        ext = file.split("/")[-1].split(".")[-1]
 
-        if add_x:
-            x = [i for i in range(0,len(data))]
+        if ext == "csv":
+            with open(file, 'r') as f:
+                dat = f.read()
+
+            data = [[float(g) for g in x.split(',')] for x in dat.strip().split('\n')]
+
+            if len(data[0]) >= 5:
+                print("Currently PyChart Cannot handle more than 5 input columns")
+                print("Only the first five data columns will be seen!!")
+
+            if add_x:
+                x = [i for i in range(0,len(data))]
+            else:
+                x = [line[0] for line in data]
+                data = [line[1:] for line in data]
+
+            out_data = np.array(data)
+            out_data = out_data.transpose()
+
+            return x, out_data.tolist()
+
+        elif ext == "json":
+            return None
+
         else:
-            x = [line[0] for line in data]
-            data = [line[1:] for line in data]
-
-        out_data = np.array(data)
-        out_data = out_data.transpose()
-
-        return x, out_data.tolist()
-
+            print(f"Unallowable Datatype: .{ext}")
+            return None
 
     def plot_static(self, g_id:int, inFile:str, isolate=True):
         """ Plots static data - file formats described in read_file method"""

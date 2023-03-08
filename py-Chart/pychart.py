@@ -9,7 +9,7 @@ import json
 
 
 S_BTN_WID = 75 # Setting up a global parameter for button width
-
+DEBUG = False
 class PyChart(QtWidgets.QMainWindow):
 
     def __init__(self, n_g=1, f_s=20, serial_dev="/dev/ttyUSB0", *args, **kwargs):
@@ -132,7 +132,7 @@ class PyChart(QtWidgets.QMainWindow):
         self.timer.setInterval(self.sample_T_ms)  # Set the timer interval
         if self.bus:
             self.timer.timeout.connect(self.live_plot_update)   # Set timeout behaviour
-        else:
+        elif DEBUG:
             self.timer.timeout.connect(self.random_liveplot_update) # For testing
         self.timer.start()                                  # Start timer
 

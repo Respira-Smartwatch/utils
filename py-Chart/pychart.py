@@ -26,7 +26,7 @@ class PyChart(QtWidgets.QMainWindow):
         self.sample_T_ms = int(1000 / f_s)
         self.wtc = True                     # Want to connect a serial device?
         try:
-            self.bus = serial.Serial(port=serial_dev, baudrate=9600, timeout=self.sample_T_ms/1000)
+            self.bus = serial.Serial(port=serial_dev, baudrate=115200, timeout=self.sample_T_ms/1000)
         except serial.SerialException:
             print("Error: Serial Bus Not Present")
             self.bus = 0
@@ -120,7 +120,7 @@ class PyChart(QtWidgets.QMainWindow):
         self.y_list = []
         self.setup_graph_data()
         for idx, y in enumerate(self.y_list):
-            self.live_lines.append(self.graphWidgets[0].plot(self.x, y, pen=self.pens[idx]))
+            self.live_lines.append(self.graphWidgets[0].plot(self.x, y, pen=self.pens[0]))
 
             #self.data_line = self.graphWidgets[0].plot(self.x,self.y, pen=self.red_pen)
             #self.data_line2 = self.graphWidgets[0].plot(self.x, self.y2, pen=self.blue_pen)
@@ -130,11 +130,13 @@ class PyChart(QtWidgets.QMainWindow):
         self.timer = QtCore.QTimer()                        # Initialize a timer
         self.timer.setTimerType(QtCore.Qt.PreciseTimer)
         self.timer.setInterval(self.sample_T_ms)  # Set the timer interval
-        if self.bus:
+        debug=False
+        if self.bus and not debug:
             self.timer.timeout.connect(self.live_plot_update)   # Set timeout behaviour
-        else:
+            self.timer.start()                                  # Start timer
+        elif debug:
             self.timer.timeout.connect(self.random_liveplot_update) # For testing
-        self.timer.start()                                  # Start timer
+            self.timer.start()                                  # Start timer
 
 
     # TODO: Add error Dialogue
@@ -194,8 +196,10 @@ class PyChart(QtWidgets.QMainWindow):
 
         dlg = QtWidgets.QFileDialog()
         dlg.setFileMode(QtWidgets.QFileDialog.AnyFile)
+        print("choose file pressed")
 
         if dlg.exec_():
+            print("EXECUTED")
             filenames = dlg.selectedFiles()
             fnames = [x.split('/')[-1] for x in filenames]
             lbl_str = ", ".join(filenames)
@@ -212,20 +216,19 @@ class PyChart(QtWidgets.QMainWindow):
             filenames = "None"
 
         self.fileLabels[g_id].setText(lbl_str)
-        print("choose file pressed")
 
         return filenames
 
     def setup_graph_data(self):
         """Function occurs - simply to setup x and y data for plotting 
            This is very temporary atm"""
-        self.x = list(range(1000))
+        self.x = list(range(10))
         if len(self.y_list) >= 2:
-            self.y_list[0] = [randint(0,100) for _ in range(1000)]
-            self.y_list[1] = [randint(0,100) for _ in range(1000)]
+            self.y_list[0] = [0 for _ in range(10)]
+            self.y_list[1] = [0 for _ in range(10)]
         else:
-            self.y_list.append([randint(0,100) for _ in range(1000)])
-            self.y_list.append([randint(0,100) for _ in range(1000)])
+            self.y_list.append([0 for _ in range(10)])
+            self.y_list.append([0 for _ in range(10)])
 
     
 
@@ -322,11 +325,19 @@ class PyChart(QtWidgets.QMainWindow):
                 
         #data = int.from_bytes(self.bus.read(1), 'little')
         data = str(self.bus.readline().decode()).strip().split(',')
-        print(data)
 
         #data = float(data[0]) if data[0] else None
+        try:
+            s = float(data[0])
+        except ValueError:
+            if data[0] == '':
+                pass
+            else:
+                print(f"ERROR {data[0]}")
 
-        if data>0:
+            return
+
+        if s:
             self.x = self.x[1:]
             self.x.append(self.x[-1] + 1)
             for idx, d in enumerate(data):
@@ -336,7 +347,9 @@ class PyChart(QtWidgets.QMainWindow):
                 self.y_list[idx].pop(0)
                 new_val = float(d)
                 self.y_list[idx].append(new_val)
+                print(self.x)
                 self.live_lines[idx].setData(self.x, self.y_list[idx])
+            self.live_lines[1].setData(self.x, self.y_list[0])
 
             #self.y = self.y[1:]
             #self.y2 = self.y2[1:]

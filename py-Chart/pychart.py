@@ -4,6 +4,7 @@ from random import randint
 import serial
 import sys  # We need sys so that we can pass argv to QApplication
 import os
+import serial.tools.list_ports
 
 S_BTN_WID = 75 # Setting up a global parameter for button width
 
@@ -21,7 +22,32 @@ class PyChart(QtWidgets.QMainWindow):
         self.num_graphs=0
         self.sample_rate_hz = f_s
         self.sample_T_ms = int(1000 / f_s)
-        self.bus = serial.Serial(port=serial_dev, baudrate=9600, timeout=self.sample_T_ms/1000)
+        busFound = 0
+        busName = serial_dev
+        while not busFound:
+            try:
+                self.bus = serial.Serial(port=busName, baudrate=9600, timeout=self.sample_T_ms/1000)
+                busFound = 1
+            except serial.SerialException as e:
+                avail_busses = serial.tools.list_ports.comports()
+                bus_string = ""
+                for idx, bus in enumerate(avail_busses):
+                    bus_string += f"{idx} : {bus}\n"
+
+                while True:
+                    new_bus = input(f"The serial bus: {busName} is not readable.\n\
+                                    \rYou may choolse from:\n\
+                                    \r{bus_string}\n\
+                                    \rPlease choose a valid bus:")
+                    
+                    if new_bus.isnumeric():
+                        new_bus = int(new_bus)
+                        break
+                    else:
+                        print("You must type a number")
+                
+                busName = avail_busses[new_bus]
+                print(busName)
 
         # Setup for modifiable layouts
         self.chart_bottom_layouts = []

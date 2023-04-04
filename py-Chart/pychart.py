@@ -3,12 +3,20 @@ import numpy as np
 import pyqtgraph as pg
 from random import randint
 import serial
+from enum import Enum
 import sys  # We need sys so that we can pass argv to QApplication
 import os
 import json
 
 
 S_BTN_WID = 75 # Setting up a global parameter for button width
+
+class Pens(Enum):
+    RED    = pg.mkPen(color=(255,0,0))    
+    BLUE   = pg.mkPen(color=(0,0,255))
+    GREEN  = pg.mkPen(color=(0,255,0))
+    PURPLE = pg.mkPen(color=(255,0,255))
+
 
 class PyChart(QtWidgets.QMainWindow):
 
@@ -37,7 +45,7 @@ class PyChart(QtWidgets.QMainWindow):
         self.graphWidgets = []
         self.fileLabels = []
         self.chooseFileButtons = []
-        
+        self.playButtons = [] 
         self.initUI()
 
     # TODO: Move live plotting to its own method
@@ -62,6 +70,11 @@ class PyChart(QtWidgets.QMainWindow):
         self.addPltBtn.setMaximumWidth(S_BTN_WID)
         self.addPltBtn.clicked.connect(self.create_graph_view)
 
+        # Add Audio Plot Button
+        self.audioPltBtn = QtWidgets.QPushButton("Audio Plot")
+        self.audioPltBtn.setMaximumWidth(S_BTN_WID)
+        self.audioPltBtn.clicked.connect(self.create_audio_graph_view) 
+
         # mock button
         self.mockButton = QtWidgets.QPushButton("Mock Live")
         self.mockButton.setMaximumWidth(S_BTN_WID)
@@ -83,6 +96,7 @@ class PyChart(QtWidgets.QMainWindow):
         # Sidebar layout stuff
         #sidebar_layout.addWidget(self.plotFileLoc)
         self.sidebar_layout.addWidget(self.addPltBtn)
+        self.sidebar_layout.addWidget(self.audioPltBtn)
         #sidebar_layout.addWidget(self.saveFileLoc)
         #self.sidebar_layout.addWidget(self.mockButton)
 
@@ -175,6 +189,49 @@ class PyChart(QtWidgets.QMainWindow):
         self.graph_layout.addLayout(layout)
         self.num_graphs += 1
 
+    def create_audio_graph_view(self):
+        """ A method that creates an audio_graph graph view up to 10"""
+
+        # Do not allow more than 10 graphs to be created
+        if(self.num_graphs >= 10):
+            print("Cannot create another graph!")
+            return -1
+
+        # Create required objects
+        layout = QtWidgets.QHBoxLayout()   
+        g = pg.PlotWidget()
+        lbl = QtWidgets.QLabel("None")
+
+        # Setup for required objects
+        btn = QtWidgets.QPushButton("Browse")  
+        btn.setMaximumWidth(S_BTN_WID)
+        btn.clicked.connect(lambda ch, i=self.num_graphs: self.file_button_pressed(i))
+
+        playBtn = QtWidgets.QPushButton("Play")
+        playBtn.setMaximumWidth(S_BTN_WID)
+        playBtn.clicked.connect(lambda ch, i=self.num_graphs: self.play_audio(i))
+
+        g.setTitle(f"Audio Graph {self.num_graphs + 1}", color="b", size='20pt')        
+        g.showGrid(x=True, y=True)
+        #g.setBackground("w")
+
+        # Layout configuration
+        layout.addWidget(btn)
+        layout.addWidget(lbl)
+        layout.addWidget(playBtn)
+
+        # Adding this to class scope lists
+        self.graphWidgets.append(g)
+        self.fileLabels.append(lbl)
+        self.chooseFileButtons.append(btn)
+        self.playButtons.append(playBtn)
+        self.chart_bottom_layouts.append(QtWidgets.QHBoxLayout())
+        self.graph_layout.addWidget(g)
+        self.graph_layout.addLayout(layout)
+        self.num_graphs += 1
+    
+    def play_audio(self, g_id):
+        raise NotImplementedError
 
     def plot_button_pressed(self):
         """What happens when the plot button is pressed"""
@@ -208,7 +265,14 @@ class PyChart(QtWidgets.QMainWindow):
             self.rename_graph(self.graphWidgets[g_id], f"Graph {g_id+1} - {lbl_str}") # TODO: FIX THIS (only uses first name)
 
             #TODO Fix Pens thing (New Static Plot Method?)
-            self.plot_static(g_id, filenames[0], isolate=True, pen=None)
+            
+            ext = filenames[0].split("/")[-1].split(".")[-1]
+            print(ext)
+
+            if ext == "json":
+                self.plot_static_datacollect_json(g_id, filenames[0], isolate=True, pen=None)
+            else: 
+                self.plot_static(g_id, filenames[0], isolate=True, pen=None)
 
         else:
             print("No File Selected")
@@ -288,6 +352,48 @@ class PyChart(QtWidgets.QMainWindow):
         for idx, source in enumerate(data):
             pen_idx = idx%len(self.pens)
             self.graphWidgets[g_id].plot(x, source, pen=self.pens[pen_idx])
+    
+    def plot_static_datacollect_json(self, g_id: int, inFilepath: str, isolate=True, pen=None):
+        if isolate:
+            self.graphWidgets[g_id].clear()
+        
+        data = json.load(open(inFilepath, "r"))
+        phases = ["baseline", "expiration1", "rest1", "expiration2", "rest2", "video", "rest3", "recitation", "rest4"]
+        tonic = []
+        audio = []
+
+        # Plot each phase with a label and a terminating vertical line
+        for i in phases:
+            for j in data[i]["gsr_tonic"]:
+                tonic.append(j)
+
+            audio_sample=[]
+            for j in data[i]["audio_sample"]:
+                audio_sample.append(j)
+            audio.append(audio_sample)
+
+            # Label the phase in the middle of its plot
+            stress_rating = data[i]["stress_rating"]
+            label = pg.TextItem(f"{i}\n{stress_rating}",anchor=(len(tonic), 0))
+            self.graphWidgets[g_id].addItem(label)
+            
+            line = pg.InfiniteLine(pos=len(tonic), pen=(pg.mkPen((0, 0, 255), dash=[2, 4])), movable=False)
+            self.graphWidgets[g_id].addItem(line)
+            # Place a red line at the end of the phase
+            #plt.axvline(x=len(tonic) - 1, color="red", linestyle="--")
+
+            
+
+        # Normalize and plot
+        tonic /= np.linalg.norm(tonic)
+
+        self.graphWidgets[g_id].plot([i for i in range(len(tonic))],tonic, pen=self.pens[0])
+
+        #plt.ylabel("Skin Conductance Response")
+        #plt.xlabel("Time (number of samples)")
+        #plt.show()
+
+
 
     def connect_serial_cli(self):
         print("No serial bus present\n\nWould you like to connect to a bus?")

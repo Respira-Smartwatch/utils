@@ -271,6 +271,7 @@ class PyChart(QtWidgets.QMainWindow):
 
             if ext == "json":
                 self.plot_static_datacollect_json(g_id, filenames[0], isolate=True, pen=None)
+                print("STATICING")
             else: 
                 self.plot_static(g_id, filenames[0], isolate=True, pen=None)
 
@@ -339,13 +340,18 @@ class PyChart(QtWidgets.QMainWindow):
             print(f"Unallowable Datatype: .{ext}")
             return None
 
-    def plot_static(self, g_id:int, inFile:str, isolate=True, pen=None):
+    def plot_static(self, g_id:int, inFile:str=None, x_data: list = None, y_data: list = None, isolate=True, pen=None):
         """ Plots static data - file formats described in read_file method"""
         # Clear given plot
         if isolate:
             self.graphWidgets[g_id].clear()
         # Pull Data from file (supported files?)
-        x, data = self.read_file(inFile)
+        if inFile:
+            x, data = self.read_file(inFile)
+        else:
+            x = x_data
+            data = y_data
+
 
         # Plot the data
 
@@ -362,37 +368,37 @@ class PyChart(QtWidgets.QMainWindow):
         tonic = []
         audio = []
 
+        lines = []
+        line_labels = []
+
         # Plot each phase with a label and a terminating vertical line
         for i in phases:
-            for j in data[i]["gsr_tonic"]:
-                tonic.append(j)
+            tonic.extend(data[i]["gsr_tonic"])
 
-            audio_sample=[]
-            for j in data[i]["audio_sample"]:
-                audio_sample.append(j)
-            audio.append(audio_sample)
+            audio.extend(data[i]["speech_samples"])
 
             # Label the phase in the middle of its plot
             stress_rating = data[i]["stress_rating"]
-            label = pg.TextItem(f"{i}\n{stress_rating}",anchor=(len(tonic), 0))
-            self.graphWidgets[g_id].addItem(label)
+            label = pg.TextItem(f"{i}\n{stress_rating}")
+            _x = len(tonic)
+            label.setPos(_x, 0.1)
+            line_labels.append(label)
             
             line = pg.InfiniteLine(pos=len(tonic), pen=(pg.mkPen((0, 0, 255), dash=[2, 4])), movable=False)
-            self.graphWidgets[g_id].addItem(line)
-            # Place a red line at the end of the phase
-            #plt.axvline(x=len(tonic) - 1, color="red", linestyle="--")
+            lines.append(line)
 
-            
 
         # Normalize and plot
         tonic /= np.linalg.norm(tonic)
+        
+        for line, label in zip(lines, line_labels):
+            self.graphWidgets[g_id].addItem(line)
+            self.graphWidgets[g_id].addItem(label)
+        
 
-        self.graphWidgets[g_id].plot([i for i in range(len(tonic))],tonic, pen=self.pens[0])
+        x = [i for i in range(len(tonic))]
 
-        #plt.ylabel("Skin Conductance Response")
-        #plt.xlabel("Time (number of samples)")
-        #plt.show()
-
+        self.graphWidgets[g_id].plot(x,tonic.tolist(), pen=self.pens[0])
 
 
     def connect_serial_cli(self):

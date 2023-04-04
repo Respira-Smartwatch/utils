@@ -3,10 +3,20 @@ import numpy as np
 import pyqtgraph as pg
 from random import randint
 import serial
+from enum import Enum
 import sys  # We need sys so that we can pass argv to QApplication
 import os
+import json
+
 
 S_BTN_WID = 75 # Setting up a global parameter for button width
+
+class Pens(Enum):
+    RED    = pg.mkPen(color=(255,0,0))    
+    BLUE   = pg.mkPen(color=(0,0,255))
+    GREEN  = pg.mkPen(color=(0,255,0))
+    PURPLE = pg.mkPen(color=(255,0,255))
+
 
 class PyChart(QtWidgets.QMainWindow):
 
@@ -24,7 +34,7 @@ class PyChart(QtWidgets.QMainWindow):
         self.sample_T_ms = int(1000 / f_s)
         self.wtc = True                     # Want to connect a serial device?
         try:
-            self.bus = serial.Serial(port=serial_dev, baudrate=9600, timeout=self.sample_T_ms/1000)
+            self.bus = serial.Serial(port=serial_dev, baudrate=115200, timeout=self.sample_T_ms/1000)
         except serial.SerialException:
             print("Error: Serial Bus Not Present")
             self.bus = 0
@@ -35,7 +45,7 @@ class PyChart(QtWidgets.QMainWindow):
         self.graphWidgets = []
         self.fileLabels = []
         self.chooseFileButtons = []
-        
+        self.playButtons = [] 
         self.initUI()
 
     # TODO: Move live plotting to its own method
@@ -60,6 +70,11 @@ class PyChart(QtWidgets.QMainWindow):
         self.addPltBtn.setMaximumWidth(S_BTN_WID)
         self.addPltBtn.clicked.connect(self.create_graph_view)
 
+        # Add Audio Plot Button
+        self.audioPltBtn = QtWidgets.QPushButton("Audio Plot")
+        self.audioPltBtn.setMaximumWidth(S_BTN_WID)
+        self.audioPltBtn.clicked.connect(self.create_audio_graph_view) 
+
         # mock button
         self.mockButton = QtWidgets.QPushButton("Mock Live")
         self.mockButton.setMaximumWidth(S_BTN_WID)
@@ -81,6 +96,7 @@ class PyChart(QtWidgets.QMainWindow):
         # Sidebar layout stuff
         #sidebar_layout.addWidget(self.plotFileLoc)
         self.sidebar_layout.addWidget(self.addPltBtn)
+        self.sidebar_layout.addWidget(self.audioPltBtn)
         #sidebar_layout.addWidget(self.saveFileLoc)
         #self.sidebar_layout.addWidget(self.mockButton)
 
@@ -96,7 +112,7 @@ class PyChart(QtWidgets.QMainWindow):
         self.x = None
         self.y = None
         self.y2 = None
-        self.setup_graph_data()
+        
 
         # pen is the line creation method: decides plot colors
         self.pens = []
@@ -114,16 +130,27 @@ class PyChart(QtWidgets.QMainWindow):
         # PLOTTING - TODO: Put this in its own method
 
         # For plot Streaming need to assign a dataline so we can update it 
-        self.data_line = self.graphWidgets[0].plot(self.x,self.y, pen=self.red_pen)
-        self.data_line2 = self.graphWidgets[0].plot(self.x, self.y2, pen=self.blue_pen)
+        self.live_lines = []
+        self.y_list = []
+        self.setup_graph_data()
+        for idx, y in enumerate(self.y_list):
+            self.live_lines.append(self.graphWidgets[0].plot(self.x, y, pen=self.pens[0]))
+
+            #self.data_line = self.graphWidgets[0].plot(self.x,self.y, pen=self.red_pen)
+            #self.data_line2 = self.graphWidgets[0].plot(self.x, self.y2, pen=self.blue_pen)
+
 
         # Start a timer function - Need a timer to update graph at certain speed.
         self.timer = QtCore.QTimer()                        # Initialize a timer
         self.timer.setTimerType(QtCore.Qt.PreciseTimer)
         self.timer.setInterval(self.sample_T_ms)  # Set the timer interval
-        if self.bus:
+        debug=False
+        if self.bus and not debug:
             self.timer.timeout.connect(self.live_plot_update)   # Set timeout behaviour
-        self.timer.start()                                  # Start timer
+            self.timer.start()                                  # Start timer
+        elif debug:
+            self.timer.timeout.connect(self.random_liveplot_update) # For testing
+            self.timer.start()                                  # Start timer
 
 
     # TODO: Add error Dialogue
@@ -162,6 +189,49 @@ class PyChart(QtWidgets.QMainWindow):
         self.graph_layout.addLayout(layout)
         self.num_graphs += 1
 
+    def create_audio_graph_view(self):
+        """ A method that creates an audio_graph graph view up to 10"""
+
+        # Do not allow more than 10 graphs to be created
+        if(self.num_graphs >= 10):
+            print("Cannot create another graph!")
+            return -1
+
+        # Create required objects
+        layout = QtWidgets.QHBoxLayout()   
+        g = pg.PlotWidget()
+        lbl = QtWidgets.QLabel("None")
+
+        # Setup for required objects
+        btn = QtWidgets.QPushButton("Browse")  
+        btn.setMaximumWidth(S_BTN_WID)
+        btn.clicked.connect(lambda ch, i=self.num_graphs: self.file_button_pressed(i))
+
+        playBtn = QtWidgets.QPushButton("Play")
+        playBtn.setMaximumWidth(S_BTN_WID)
+        playBtn.clicked.connect(lambda ch, i=self.num_graphs: self.play_audio(i))
+
+        g.setTitle(f"Audio Graph {self.num_graphs + 1}", color="b", size='20pt')        
+        g.showGrid(x=True, y=True)
+        #g.setBackground("w")
+
+        # Layout configuration
+        layout.addWidget(btn)
+        layout.addWidget(lbl)
+        layout.addWidget(playBtn)
+
+        # Adding this to class scope lists
+        self.graphWidgets.append(g)
+        self.fileLabels.append(lbl)
+        self.chooseFileButtons.append(btn)
+        self.playButtons.append(playBtn)
+        self.chart_bottom_layouts.append(QtWidgets.QHBoxLayout())
+        self.graph_layout.addWidget(g)
+        self.graph_layout.addLayout(layout)
+        self.num_graphs += 1
+    
+    def play_audio(self, g_id):
+        raise NotImplementedError
 
     def plot_button_pressed(self):
         """What happens when the plot button is pressed"""
@@ -173,7 +243,7 @@ class PyChart(QtWidgets.QMainWindow):
     
 
     # TODO: Store file somewhere 
-    # TODO: Read file here or at other location
+    # Done: Read file here or at other location
     # TODO: Setup File Protection!
     def file_button_pressed(self, g_id):
         """Occurs when the File button is pressed, opens a file dialogue, and gets
@@ -183,30 +253,48 @@ class PyChart(QtWidgets.QMainWindow):
 
         dlg = QtWidgets.QFileDialog()
         dlg.setFileMode(QtWidgets.QFileDialog.AnyFile)
+        print("choose file pressed")
 
         if dlg.exec_():
+            print("EXECUTED")
             filenames = dlg.selectedFiles()
             fnames = [x.split('/')[-1] for x in filenames]
             lbl_str = ", ".join(filenames)
             print(fnames)
-            self.rename_graph(self.graphWidgets[g_id], f"Graph {g_id+1} - {fnames[0]}") # TODO: FIX THIS (only uses first name)
-            self.plot_static(g_id, filenames[0])
+            
+            self.rename_graph(self.graphWidgets[g_id], f"Graph {g_id+1} - {lbl_str}") # TODO: FIX THIS (only uses first name)
+
+            #TODO Fix Pens thing (New Static Plot Method?)
+            
+            ext = filenames[0].split("/")[-1].split(".")[-1]
+            print(ext)
+
+            if ext == "json":
+                self.plot_static_datacollect_json(g_id, filenames[0], isolate=True, pen=None)
+                print("STATICING")
+            else: 
+                self.plot_static(g_id, filenames[0], isolate=True, pen=None)
+
         else:
             print("No File Selected")
             lbl_str = "No File Selected"
             filenames = "None"
 
         self.fileLabels[g_id].setText(lbl_str)
-        print("choose file pressed")
 
         return filenames
 
     def setup_graph_data(self):
         """Function occurs - simply to setup x and y data for plotting 
            This is very temporary atm"""
-        self.x = list(range(1000))
-        self.y = [randint(0,100) for _ in range(1000)]
-        self.y2 = [randint(0,100) for _ in range(1000)]
+        self.x = list(range(10))
+        if len(self.y_list) >= 2:
+            self.y_list[0] = [0 for _ in range(10)]
+            self.y_list[1] = [0 for _ in range(10)]
+        else:
+            self.y_list.append([0 for _ in range(10)])
+            self.y_list.append([0 for _ in range(10)])
+
     
 
     def rename_graph(self, graph, name: str, col="b", sz="20pt"):
@@ -214,6 +302,7 @@ class PyChart(QtWidgets.QMainWindow):
         graph.setTitle(name, color=col, size=sz)
 
     # TODO: Make this read multiple filetypes
+    # TODO: Make this accept files with two columns x and y
     # TODO: Create Error handling dialogues
     # DONE: Make this accept files with two (NOW FIVE)  columns x and y
     # DONE: Allow first column to be X values
@@ -221,37 +310,96 @@ class PyChart(QtWidgets.QMainWindow):
         """ A Function that reads a file, and returns x and y lists 
             Currently only supports files with numbers on newlines."""
 
-        with open(file, 'r') as f:
-            dat = f.read()
-        
-        data = [[float(g) for g in x.split(',')] for x in dat.strip().split('\n')]
-        
-        if len(data[0]) >= 5:
-            print("Currently PyChart Cannot handle more than 5 input columns")
-            print("Only the first five data columns will be seen!!")
+        ext = file.split("/")[-1].split(".")[-1]
 
-        if add_x:
-            x = [i for i in range(0,len(data))]
+        if ext == "csv":
+            with open(file, 'r') as f:
+                dat = f.read()
+
+            data = [[float(g) for g in x.split(',')] for x in dat.strip().split('\n')]
+
+            if len(data[0]) >= 5:
+                print("Currently PyChart Cannot handle more than 5 input columns")
+                print("Only the first five data columns will be seen!!")
+
+            if add_x:
+                x = [i for i in range(0,len(data))]
+            else:
+                x = [line[0] for line in data]
+                data = [line[1:] for line in data]
+
+            out_data = np.array(data)
+            out_data = out_data.transpose()
+
+            return x, out_data.tolist()
+
+        elif ext == "json":
+            return None
+
         else:
-            x = [line[0] for line in data]
-            data = [line[1:] for line in data]
+            print(f"Unallowable Datatype: .{ext}")
+            return None
 
-        out_data = np.array(data)
-        out_data = out_data.transpose()
-
-        return x, out_data.tolist()
-
-
-    def plot_static(self, g_id:int, inFile:str, isolate=True):
+    def plot_static(self, g_id:int, inFile:str=None, x_data: list = None, y_data: list = None, isolate=True, pen=None):
         """ Plots static data - file formats described in read_file method"""
         # Clear given plot
         if isolate:
             self.graphWidgets[g_id].clear()
         # Pull Data from file (supported files?)
-        x, data = self.read_file(inFile)
+        if inFile:
+            x, data = self.read_file(inFile)
+        else:
+            x = x_data
+            data = y_data
+
+
         # Plot the data
+
         for idx, source in enumerate(data):
-            self.graphWidgets[g_id].plot(x, source, pen=self.pens[idx])
+            pen_idx = idx%len(self.pens)
+            self.graphWidgets[g_id].plot(x, source, pen=self.pens[pen_idx])
+    
+    def plot_static_datacollect_json(self, g_id: int, inFilepath: str, isolate=True, pen=None):
+        if isolate:
+            self.graphWidgets[g_id].clear()
+        
+        data = json.load(open(inFilepath, "r"))
+        phases = ["baseline", "expiration1", "rest1", "expiration2", "rest2", "video", "rest3", "recitation", "rest4"]
+        tonic = []
+        audio = []
+
+        lines = []
+        line_labels = []
+
+        # Plot each phase with a label and a terminating vertical line
+        for i in phases:
+            tonic.extend(data[i]["gsr_tonic"])
+
+            audio.extend(data[i]["speech_samples"])
+
+            # Label the phase in the middle of its plot
+            stress_rating = data[i]["stress_rating"]
+            label = pg.TextItem(f"{i}\n{stress_rating}")
+            _x = len(tonic)
+            label.setPos(_x, 0.1)
+            line_labels.append(label)
+            
+            line = pg.InfiniteLine(pos=len(tonic), pen=(pg.mkPen((0, 0, 255), dash=[2, 4])), movable=False)
+            lines.append(line)
+
+
+        # Normalize and plot
+        tonic /= np.linalg.norm(tonic)
+        
+        for line, label in zip(lines, line_labels):
+            self.graphWidgets[g_id].addItem(line)
+            self.graphWidgets[g_id].addItem(label)
+        
+
+        x = [i for i in range(len(tonic))]
+
+        self.graphWidgets[g_id].plot(x,tonic.tolist(), pen=self.pens[0])
+
 
     def connect_serial_cli(self):
         print("No serial bus present\n\nWould you like to connect to a bus?")
@@ -289,21 +437,52 @@ class PyChart(QtWidgets.QMainWindow):
                 
         #data = int.from_bytes(self.bus.read(1), 'little')
         data = str(self.bus.readline().decode()).strip().split(',')
-        print(data)
 
-        data = float(data[0])
+        #data = float(data[0]) if data[0] else None
+        try:
+            s = float(data[0])
+        except ValueError:
+            if data[0] == '':
+                pass
+            else:
+                print(f"ERROR {data[0]}")
 
-        if data > 0:
+            return
+
+        if s:
             self.x = self.x[1:]
             self.x.append(self.x[-1] + 1)
-            self.y = self.y[1:]
-            self.y2 = self.y2[1:]
-            print(data)
-            data = float(data)
-            self.y.append(data)
-            self.y2.append(data2)
-            self.data_line.setData(self.x, self.y)
-            self.data_line2.setData(self.x, self.y2)
+            for idx, d in enumerate(data):
+                if idx > len(self.live_lines)-1:
+                    print(f"Max plots is {len(self.live_lines)}, Cannot plot")
+                    break
+                self.y_list[idx].pop(0)
+                new_val = float(d)
+                self.y_list[idx].append(new_val)
+                print(self.x)
+                self.live_lines[idx].setData(self.x, self.y_list[idx])
+            self.live_lines[1].setData(self.x, self.y_list[0])
+
+            #self.y = self.y[1:]
+            #self.y2 = self.y2[1:]
+            #print(data)
+            #data = float(data)
+            #self.y.append(data)
+            #self.y2.append(data2)
+            #self.data_line.setData(self.x, self.y)
+            #self.data_line2.setData(self.x, self.y2)
+        
+    def random_liveplot_update(self):
+        self.x = self.x[1:]
+        self.x.append(self.x[-1] + 1)
+
+        self.y_list[0] = self.y_list[0][1:]
+        self.y_list[1] = self.y_list[1][1:]
+        self.y_list[0].append(randint(0,100))
+        self.y_list[1].append(randint(0,100))
+
+        self.live_lines[0].setData(self.x, self.y_list[0])
+        self.live_lines[1].setData(self.x, self.y_list[1])
         
 
 

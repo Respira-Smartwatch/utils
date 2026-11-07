@@ -29,7 +29,6 @@ class gSerial(serial.Serial):
             self.bus = 0
             self.connect_serial_cli()
 
-
        
     def connect_serial_cli(self)->serial.Serial:
         print("No serial bus present\n\nWould you like to connect to a bus?")
@@ -76,9 +75,8 @@ class GraphWidget(QtWidgets.QWidget):
         self.sample_rate_hz = live_freq_hz
         self.sample_T_ms = int(1000 / live_freq_hz) 
         self.bus = gSerial()
-        self.x = None
-        self.y = None
-        self.setup_graph_data()
+        self.x = list(range(3000))
+        self.y = [randint(0,100) for _ in range(3000)]
 
         # Setup for required objects ====
         # Browse Button
@@ -96,15 +94,14 @@ class GraphWidget(QtWidgets.QWidget):
         self.y_min = QtWidgets.QLineEdit()
         self.y_min.setFixedWidth(120)
         self.y_min.editingFinished.connect(lambda: self.set_y_range(self.y_min.text(), y_max=False))
-        self.y_min.setPlaceholderText("0")
         self.y_max = QtWidgets.QLineEdit()
         self.y_max.setFixedWidth(120)
         self.y_max.editingFinished.connect(lambda: self.set_y_range(self.y_max.text(), y_max=True))
-        self.y_max.setPlaceholderText("255")
         self.data_line = self.graph.plot(self.x,self.y, pen=Pens.RED.value)
 
         self.y_range = self.graph.getViewBox().viewRange()[0]
-        
+
+        self.graph.setTitle(f"Graph {name}", color="b", size='20pt')        
         self.graph.showGrid(x=True, y=True)
         #g.setBackground("w")
 
@@ -127,9 +124,6 @@ class GraphWidget(QtWidgets.QWidget):
         if self.bus:
             self.timer.timeout.connect(self.live_plot_update)   # Set timeout behaviour
             self.timer.start()                                  # Start timer
-
-
-        print(self.graph.getViewBox().viewRange())
 
     def set_y_range(self, value, y_max=False):
         """Set the y_range of the graph object.
@@ -163,7 +157,7 @@ class GraphWidget(QtWidgets.QWidget):
             fnames = [x.split('/')[-1] for x in filenames]
             lbl_str = ", ".join(filenames)
             print(fnames)
-            self.rename_graph(self.graph, f"Graph NEW - {fnames[0]}") # TODO: FIX THIS (only uses first name)
+            self.rename_graph(self.graph, f"Graph of {fnames[0]}") # TODO: FIX THIS (only uses first name)
             self.plot_static(g_id, filenames[0])
         else:
             print("No File Selected")
@@ -267,18 +261,8 @@ class GraphWidget(QtWidgets.QWidget):
         #print(len(self.x), len(self.y))
         self.data_line.setData(self.x, self.y)
 
-        print(self.graph.getViewBox().viewRange())
-
-    def setup_graph_data(self):
-        """Function occurs - simply to setup x and y data for plotting 
-           This is very temporary atm"""
-        self.x = list(range(3000))
-        self.y = [randint(0,100) for _ in range(3000)]
-        self.y2 = [randint(0,100) for _ in range(3000)]
-    
-
 class PyChart(QtWidgets.QMainWindow):
-    def __init__(self, n_g=1, f_s=20, serial_dev="/dev/ttyUSB0", baudrate=9600, *args, **kwargs):
+    def __init__(self, n_g=1, f_s=20, *args, **kwargs):
         """Standard init function. Sets some variables 
            Specify number of desired graphs with the n_g parameter"""
 
@@ -348,8 +332,10 @@ class PyChart(QtWidgets.QMainWindow):
         if(self.num_graphs >= 10):
             print("Cannot create another graph!")
             return -1
-        
-        new_graph_widget = GraphWidget(name="NEW")
+
+        name = f"/tty/ACM0" 
+
+        new_graph_widget = GraphWidget(name=name)
         self.graphWidgets.append(new_graph_widget)
         self.graph_layout.addLayout(new_graph_widget.main_layout)
         self.num_graphs += 1
@@ -357,7 +343,7 @@ class PyChart(QtWidgets.QMainWindow):
     
 def main():
     app = QtWidgets.QApplication(sys.argv)
-    main = PyChart(f_s= 50, n_g=1, serial_dev="/dev/ttyACM0", baudrate=115200)
+    main = PyChart(f_s= 50, n_g=1)
     main.show()
     sys.exit(app.exec_())
 

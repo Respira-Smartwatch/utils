@@ -1,4 +1,5 @@
 from PyQt5 import QtWidgets, QtCore, QtGui
+from enum import Enum
 import numpy as np
 import pyqtgraph as pg
 from random import randint
@@ -8,114 +9,116 @@ import os
 
 S_BTN_WID = 75 # Setting up a global parameter for button width
 
-class PyChart(QtWidgets.QMainWindow):
+class Pens(Enum):
+    RED = pg.mkPen(color=(255,0,0))    
+    BLUE = pg.mkPen(color=(0,0,255))
+    GREEN = pg.mkPen(color=(0,255,0))
+    PURPLE = pg.mkPen(color=(255,0,255))
+    CYAN = pg.mkPen(color=(0,255, 255))
 
-    def __init__(self, n_g=1, f_s=20, serial_dev="/dev/ttyUSB0", *args, **kwargs):
-        """Standard init function. Sets some variables 
-           Specify number of desired graphs with the n_g parameter"""
+    def list():
+       return [p.value for p in Pens]
 
-        super(PyChart, self).__init__(*args, **kwargs)
-        self.title = "Py-Chart"
-        self.width = 1280
-        self.height = 960
-        self.init_graphs_no = n_g
-        self.num_graphs=0
-        self.sample_rate_hz = f_s
-        self.sample_T_ms = int(1000 / f_s)
-        self.wtc = True                     # Want to connect a serial device?
+class gSerial(serial.Serial):
+    def __init__(self, port="/dev/ttyACM0", baudrate=115200, timeout=10, *args, **kwargs):
+        self.accepted_bauds = [9600, 115200]
         try:
-            self.bus = serial.Serial(port=serial_dev, baudrate=9600, timeout=self.sample_T_ms/1000)
+            super().__init__(port=port, baudrate=baudrate, timeout=timeout, *args, **kwargs)
         except serial.SerialException:
-            print("Error: Serial Bus Not Present")
+            print(f"Error: Serial Bus {port} Not Present")
             self.bus = 0
             self.connect_serial_cli()
 
-        # Setup for modifiable layouts
-        self.chart_bottom_layouts = []
-        self.graphWidgets = []
-        self.fileLabels = []
-        self.chooseFileButtons = []
-        
-        self.initUI()
 
-    # TODO: Move live plotting to its own method
-    def initUI(self):
-        """Bulk of UI initialization and creation"""
+       
+    def connect_serial_cli(self)->serial.Serial:
+        print("No serial bus present\n\nWould you like to connect to a bus?")
+        while True:
+            ans = input("y/n:")
+            if ans.lower() not in ["y", "n"]:
+                print("Please enter 'y' or 'n'")
+                continue
+            elif ans.lower() == "n":
+                self.bus = 0
+                return 0
+            else:
+                ser = input("Enter path to serial bus:")
+                baud = int(input("Enter baud rage:"))
+                if int(baud) not in self.accepted_bauds:
+                    print(f"{baud} is not a value in {accepted_bauds} - using {accepted_bauds[0]}")
+                    baud = self.accepted_bauds[0]
+            try:
+                super().__init__(port=ser, baudrate=baud, timeout=self.timeout)
+                break
+            except serial.SerialException:
+                print(f"bus: '{ser}' is not a valid serial bus.")
+                ans = input("Try again? (y/n):").lower().strip()
+                if ans != "y":
+                    print("Continuing without a serial bus")
+                    self.bus = 0
+                    return 0
+                continue
+        return self
+    
+class GraphWidget(QtWidgets.QWidget):
+    """ A class that creates graph view"""
+    def __init__(self, name="none", live_freq_hz = 1, *args, **kwargs):
+        super().__init__(*args, **kwargs)
 
-        # UI SETUP --------------------------------------------------------
-        
-        # Setting Window title
-        self.setWindowTitle(self.title)
-        self.resize(self.width, self.height)
+        # Create required objects ====
+        # QT Info
+        self.main_layout = QtWidgets.QVBoxLayout()
+        self.bar_layout = QtWidgets.QHBoxLayout()   
+        self.graph = pg.PlotWidget()
+        self.pens = Pens.list()
 
-        # Create Static Layouts
-        self.main_layout = QtWidgets.QHBoxLayout()
-        self.graph_layout = QtWidgets.QVBoxLayout()
-        self.sidebar_layout = QtWidgets.QVBoxLayout()
-
-        # Initialize and connect Widgets ------------------------------------ 
-
-        # Add Plot button
-        self.addPltBtn = QtWidgets.QPushButton("Add Plot")
-        self.addPltBtn.setMaximumWidth(S_BTN_WID)
-        self.addPltBtn.clicked.connect(self.create_graph_view)
-
-        # mock button
-        self.mockButton = QtWidgets.QPushButton("Mock Live")
-        self.mockButton.setMaximumWidth(S_BTN_WID)
-        self.mockButton.clicked.connect(self.mock_button_pressed)
-
-        # text boxes: TODO: Decide on necessity
-        self.plotFileLoc = QtWidgets.QLineEdit("Enter File Location")
-        self.saveFileLoc = QtWidgets.QLineEdit("Enter a Save File")
-
-        # Layout population -------------------------------------------------
-        # Populate Main Layout : Grid layout houses a vertical layout
-        self.main_layout.addLayout(self.graph_layout)
-        self.main_layout.addLayout(self.sidebar_layout)
-
-        # Create Graph views for n_g number of graphs
-        for _ in range(self.init_graphs_no):
-            self.create_graph_view()
-
-        # Sidebar layout stuff
-        #sidebar_layout.addWidget(self.plotFileLoc)
-        self.sidebar_layout.addWidget(self.addPltBtn)
-        #sidebar_layout.addWidget(self.saveFileLoc)
-        #self.sidebar_layout.addWidget(self.mockButton)
-
-        # Dummy widget - layout application --------------------------------- 
-        # Create and utilize dummy widget (have to apply layout to dummy)
-        widget = QtWidgets.QWidget()
-        widget.setLayout(self.main_layout)
-        self.setCentralWidget(widget)
-
-        # Plotting ----------------------------------------------------------
-        # TODO - Relegate to its own method
-        # PlaceHolder data types: not necessary here TODO: Remove?
+        # Data Info
+        self.sample_rate_hz = live_freq_hz
+        self.sample_T_ms = int(1000 / live_freq_hz) 
+        self.bus = gSerial()
         self.x = None
         self.y = None
-        self.y2 = None
         self.setup_graph_data()
 
-        # pen is the line creation method: decides plot colors
-        self.pens = []
-        self.red_pen = pg.mkPen(color=(255,0,0))    
-        self.blue_pen = pg.mkPen(color=(0,0,255))
-        self.green_pen = pg.mkPen(color=(0,255,0))
-        self.purple_pen = pg.mkPen(color=(255,0,255))
-        self.cyan_pen = pg.mkPen(color=(0,255, 255))
-        self.pens.append(self.red_pen)
-        self.pens.append(self.blue_pen)
-        self.pens.append(self.green_pen)
-        self.pens.append(self.purple_pen)
-        self.pens.append(self.cyan_pen)
+        # Setup for required objects ====
+        # Browse Button
+        self.browse_btn = QtWidgets.QPushButton("Browse")  
+        self.browse_btn.setMaximumWidth(S_BTN_WID)
+        self.browse_btn.clicked.connect(self.file_button_pressed)
+        self.browse_lbl = QtWidgets.QLabel("File: None")
 
-        # PLOTTING - TODO: Put this in its own method
+        # TODO: Mock Button
+        #self.mockButton = QtWidgets.QPushButton("Mock Live")
+        #self.mockButton.setMaximumWidth(S_BTN_WID)
+        #self.mockButton.clicked.connect(self.mock_button_pressed)
 
-        # For plot Streaming need to assign a dataline so we can update it 
-        self.data_line = self.graphWidgets[0].plot(self.x,self.y, pen=self.red_pen)
-        self.data_line2 = self.graphWidgets[0].plot(self.x, self.y2, pen=self.blue_pen)
+        # Y Range setup 
+        self.y_min = QtWidgets.QLineEdit()
+        self.y_min.setFixedWidth(120)
+        self.y_min.editingFinished.connect(lambda: self.set_y_range(self.y_min.text(), y_max=False))
+        self.y_min.setPlaceholderText("0")
+        self.y_max = QtWidgets.QLineEdit()
+        self.y_max.setFixedWidth(120)
+        self.y_max.editingFinished.connect(lambda: self.set_y_range(self.y_max.text(), y_max=True))
+        self.y_max.setPlaceholderText("255")
+        self.data_line = self.graph.plot(self.x,self.y, pen=Pens.RED.value)
+
+        self.y_range = self.graph.getViewBox().viewRange()[0]
+        
+        self.graph.showGrid(x=True, y=True)
+        #g.setBackground("w")
+
+        # Layout configuration
+        self.bar_layout.addWidget(self.browse_btn)
+        self.bar_layout.addWidget(self.browse_lbl)
+        self.bar_layout.addSpacing(40)
+        self.bar_layout.addWidget(QtWidgets.QLabel("y_min"))
+        self.bar_layout.addWidget(self.y_min)
+        self.bar_layout.addWidget(QtWidgets.QLabel("y_max"))
+        self.bar_layout.addWidget(self.y_max)
+        self.bar_layout.addStretch(2)
+        self.main_layout.addWidget(self.graph)
+        self.main_layout.addLayout(self.bar_layout)
 
         # Start a timer function - Need a timer to update graph at certain speed.
         self.timer = QtCore.QTimer()                        # Initialize a timer
@@ -123,59 +126,30 @@ class PyChart(QtWidgets.QMainWindow):
         self.timer.setInterval(self.sample_T_ms)  # Set the timer interval
         if self.bus:
             self.timer.timeout.connect(self.live_plot_update)   # Set timeout behaviour
-        self.timer.start()                                  # Start timer
+            self.timer.start()                                  # Start timer
 
 
-    # TODO: Add error Dialogue
-    def create_graph_view(self):
-        """ A method that creates  graph view up to 10"""
+        print(self.graph.getViewBox().viewRange())
 
-        # Do not allow more than 10 graphs to be created
-        if(self.num_graphs >= 10):
-            print("Cannot create another graph!")
-            return -1
+    def set_y_range(self, value, y_max=False):
+        """Set the y_range of the graph object.
+            value: value to set:
+            y_max: set y_max if true, else set y_min
+        """
+        if not value.isdigit():
+            return
+        
+        # Debug print for testing
+        #print(f"setting {"y_max" if y_max else "y_min"} to {value}")
+        old_y_range = self.graph.getViewBox().viewRange()[1]
+        if y_max:
+            self.y_range = (old_y_range[0], int(value))
+        else:
+            self.y_range = (int(value), old_y_range[1])
+        
+        self.graph.setYRange(*self.y_range)
 
-        # Create required objects
-        layout = QtWidgets.QHBoxLayout()   
-        g = pg.PlotWidget()
-        lbl = QtWidgets.QLabel("None")
-
-        # Setup for required objects
-        btn = QtWidgets.QPushButton("Browse")  
-        btn.setMaximumWidth(S_BTN_WID)
-        btn.clicked.connect(lambda ch, i=self.num_graphs: self.file_button_pressed(i))
-
-        g.setTitle(f"Graph {self.num_graphs + 1}", color="b", size='20pt')        
-        g.showGrid(x=True, y=True)
-        #g.setBackground("w")
-
-        # Layout configuration
-        layout.addWidget(btn)
-        layout.addWidget(lbl)
-
-        # Adding this to class scope lists
-        self.graphWidgets.append(g)
-        self.fileLabels.append(lbl)
-        self.chooseFileButtons.append(btn)
-        self.chart_bottom_layouts.append(QtWidgets.QHBoxLayout())
-        self.graph_layout.addWidget(g)
-        self.graph_layout.addLayout(layout)
-        self.num_graphs += 1
-
-
-    def plot_button_pressed(self):
-        """What happens when the plot button is pressed"""
-        print("plot pressed")
-
-    def mock_button_pressed(self):
-        """What happens when the mock button is pressed"""
-        print("mock pressed")
-    
-
-    # TODO: Store file somewhere 
-    # TODO: Read file here or at other location
-    # TODO: Setup File Protection!
-    def file_button_pressed(self, g_id):
+    def file_button_pressed(self):
         """Occurs when the File button is pressed, opens a file dialogue, and gets
            path to desired file or files.
            Currently has no filters, and does no error checking!
@@ -189,29 +163,44 @@ class PyChart(QtWidgets.QMainWindow):
             fnames = [x.split('/')[-1] for x in filenames]
             lbl_str = ", ".join(filenames)
             print(fnames)
-            self.rename_graph(self.graphWidgets[g_id], f"Graph {g_id+1} - {fnames[0]}") # TODO: FIX THIS (only uses first name)
+            self.rename_graph(self.graph, f"Graph NEW - {fnames[0]}") # TODO: FIX THIS (only uses first name)
             self.plot_static(g_id, filenames[0])
         else:
             print("No File Selected")
             lbl_str = "No File Selected"
             filenames = "None"
 
-        self.fileLabels[g_id].setText(lbl_str)
+        self.browse_lbl.setText(f"File: {lbl_str}")
         print("choose file pressed")
 
         return filenames
 
-    def setup_graph_data(self):
-        """Function occurs - simply to setup x and y data for plotting 
-           This is very temporary atm"""
-        self.x = list(range(1000))
-        self.y = [randint(0,100) for _ in range(1000)]
-        self.y2 = [randint(0,100) for _ in range(1000)]
+    def plot_button_pressed(self):
+        """What happens when the plot button is pressed"""
+        print("plot pressed")
+
+    def mock_button_pressed(self):
+        """What happens when the mock button is pressed"""
+        print("mock pressed")
     
+    def yrange(self):
+        return
+
 
     def rename_graph(self, graph, name: str, col="b", sz="20pt"):
         """A function that renames the graph for easy renaming"""
         graph.setTitle(name, color=col, size=sz)
+
+    def plot_static(self, inFile:str, isolate=True):
+        """ Plots static data - file formats described in read_file method"""
+        # Clear given plot
+        if isolate:
+            self.graph.clear()
+        # Pull Data from file (supported files?)
+        x, data = self.read_file(inFile)
+        # Plot the data
+        for idx, source in enumerate(data):
+            self.graph.plot(x, source, pen=self.pens[idx])
 
     # TODO: Make this read multiple filetypes
     # TODO: Create Error handling dialogues
@@ -241,43 +230,6 @@ class PyChart(QtWidgets.QMainWindow):
 
         return x, out_data.tolist()
 
-
-    def plot_static(self, g_id:int, inFile:str, isolate=True):
-        """ Plots static data - file formats described in read_file method"""
-        # Clear given plot
-        if isolate:
-            self.graphWidgets[g_id].clear()
-        # Pull Data from file (supported files?)
-        x, data = self.read_file(inFile)
-        # Plot the data
-        for idx, source in enumerate(data):
-            self.graphWidgets[g_id].plot(x, source, pen=self.pens[idx])
-
-    def connect_serial_cli(self):
-        print("No serial bus present\n\nWould you like to connect to a bus?")
-        while True:
-            ans = input("y/n:")
-            if ans.lower() not in ["y", "n"]:
-                print("Please enter 'y' or 'n'")
-                continue
-            elif ans.lower() == "n":
-                self.bus = 0
-                self.wtc = False
-                return 0
-            else:
-                ser = input("Enter path to serial bus:")
-            try:
-                self.bus = serial.Serial(port=ser, baudrate=9600, timeout=self.sample_T_ms/1000)
-            except serial.SerialException:
-                print(f"bus: '{ser}' is not a valid serial bus.")
-                ans = input("Try again? (y/n):").lower().strip()
-                if ans != "y":
-                    print("Continuing without a serial bus")
-                    self.bus = 0
-                    self.wtc = False
-                    return 0
-                continue
-    
     # DONE: Mess with this and allow live plotting!
     # TODO: Generalize this and allow multiple plotting streams!
     def live_plot_update(self):
@@ -285,32 +237,127 @@ class PyChart(QtWidgets.QMainWindow):
         if not self.bus:
             print("No Live Plotting Available (No Serial Present)")
             return
-            
                 
         #data = int.from_bytes(self.bus.read(1), 'little')
-        data = str(self.bus.readline().decode()).strip().split(',')
-        print(data)
+        #data = str(self.bus.readline().decode()).strip().split(',')
+        raw_data = str(self.bus.read_all().decode()).strip().replace("\r", "")
 
-        data = float(data[0])
+        data = []
 
-        if data > 0:
-            self.x = self.x[1:]
-            self.x.append(self.x[-1] + 1)
-            self.y = self.y[1:]
-            self.y2 = self.y2[1:]
-            print(data)
-            data = float(data)
-            self.y.append(data)
-            self.y2.append(data2)
-            self.data_line.setData(self.x, self.y)
-            self.data_line2.setData(self.x, self.y2)
+        for line in raw_data.split("\n"):
+            if "DMA" in line or "SOMETHING" in line or line.strip() == "":
+                continue
+            data.extend([int(x) for x in line.strip().split(",") if x != ""])
+
+        if len(data) == 0:
+            return 
+
+        #print(data)
+        #print(len(data))
+
+        self.x = self.x[len(data):]
+        self.y = self.y[len(data):]
+        #print(len(self.x), len(self.y))
+
+        last_x_val = self.x[-1] + 1
+
+        self.x.extend(list(range(last_x_val, last_x_val + len(data))))
+        self.y.extend(data)
+
+        #print(len(self.x), len(self.y))
+        self.data_line.setData(self.x, self.y)
+
+        print(self.graph.getViewBox().viewRange())
+
+    def setup_graph_data(self):
+        """Function occurs - simply to setup x and y data for plotting 
+           This is very temporary atm"""
+        self.x = list(range(3000))
+        self.y = [randint(0,100) for _ in range(3000)]
+        self.y2 = [randint(0,100) for _ in range(3000)]
+    
+
+class PyChart(QtWidgets.QMainWindow):
+    def __init__(self, n_g=1, f_s=20, serial_dev="/dev/ttyUSB0", baudrate=9600, *args, **kwargs):
+        """Standard init function. Sets some variables 
+           Specify number of desired graphs with the n_g parameter"""
+
+        super(PyChart, self).__init__(*args, **kwargs)
+        self.title = "Py-Chart"
+        self.width = 1280
+        self.height = 960
+        self.init_graphs_no = n_g
+        self.num_graphs=0
+
+        # Setup for modifiable layouts
+        self.graphWidgets = []
         
+        self.initUI()
 
+    # TODO: Move live plotting to its own method
+    def initUI(self):
+        """Bulk of UI initialization and creation"""
 
+        # UI SETUP --------------------------------------------------------
+        
+        # Setting Window title
+        self.setWindowTitle(self.title)
+        self.resize(self.width, self.height)
 
+        # Create Static Layouts
+        self.main_layout = QtWidgets.QHBoxLayout()
+        self.graph_layout = QtWidgets.QVBoxLayout()
+        self.sidebar_layout = QtWidgets.QVBoxLayout()
+
+        # Initialize and connect Widgets ------------------------------------ 
+
+        # Add Plot button
+        self.addPltBtn = QtWidgets.QPushButton("Add Plot")
+        self.addPltBtn.setMaximumWidth(S_BTN_WID)
+        self.addPltBtn.clicked.connect(self.create_graph_view)
+
+        # text boxes: TODO: Decide on necessity
+        self.plotFileLoc = QtWidgets.QLineEdit("Enter File Location")
+        self.saveFileLoc = QtWidgets.QLineEdit("Enter a Save File")
+
+        # Layout population -------------------------------------------------
+        # Populate Main Layout : Grid layout houses a vertical layout
+        self.main_layout.addLayout(self.graph_layout)
+        self.main_layout.addLayout(self.sidebar_layout)
+
+        # Create Graph views for n_g number of graphs
+        for _ in range(self.init_graphs_no):
+            self.create_graph_view()
+
+        # Sidebar layout stuff
+        #sidebar_layout.addWidget(self.plotFileLoc)
+        self.sidebar_layout.addWidget(self.addPltBtn)
+        #sidebar_layout.addWidget(self.saveFileLoc)
+        #self.sidebar_layout.addWidget(self.mockButton)
+
+        # Dummy widget - layout application --------------------------------- 
+        # Create and utilize dummy widget (have to apply layout to dummy)
+        widget = QtWidgets.QWidget()
+        widget.setLayout(self.main_layout)
+        self.setCentralWidget(widget)
+
+    # TODO: Add error Dialogue
+    def create_graph_view(self):
+        """ A method that creates  graph view up to 10"""
+        # Do not allow more than 10 graphs to be created
+        if(self.num_graphs >= 10):
+            print("Cannot create another graph!")
+            return -1
+        
+        new_graph_widget = GraphWidget(name="NEW")
+        self.graphWidgets.append(new_graph_widget)
+        self.graph_layout.addLayout(new_graph_widget.main_layout)
+        self.num_graphs += 1
+
+    
 def main():
     app = QtWidgets.QApplication(sys.argv)
-    main = PyChart(f_s= 50, n_g=2)
+    main = PyChart(f_s= 50, n_g=1, serial_dev="/dev/ttyACM0", baudrate=115200)
     main.show()
     sys.exit(app.exec_())
 

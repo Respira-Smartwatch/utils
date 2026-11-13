@@ -26,20 +26,18 @@ class gSerial(serial.Serial):
             super().__init__(port=port, baudrate=baudrate, timeout=timeout, *args, **kwargs)
         except serial.SerialException:
             print(f"Error: Serial Bus {port} Not Present")
-            self.bus = 0
-            self.connect_serial_cli()
-
+            if self.connect_serial_cli() is None:
+                print("Continuing without setting up a live connection")
        
     def connect_serial_cli(self)->serial.Serial:
-        print("No serial bus present\n\nWould you like to connect to a bus?")
+        print("\n\nWould you like to connect to a bus?")
         while True:
             ans = input("y/n:")
             if ans.lower() not in ["y", "n"]:
                 print("Please enter 'y' or 'n'")
                 continue
             elif ans.lower() == "n":
-                self.bus = 0
-                return 0
+                return None
             else:
                 ser = input("Enter path to serial bus:")
                 baud = int(input("Enter baud rage:"))
@@ -54,11 +52,11 @@ class gSerial(serial.Serial):
                 ans = input("Try again? (y/n):").lower().strip()
                 if ans != "y":
                     print("Continuing without a serial bus")
-                    self.bus = 0
-                    return 0
+                    return None
                 continue
         return self
     
+
 class GraphWidget(QtWidgets.QWidget):
     """ A class that creates graph view"""
     def __init__(self, name="none", live_freq_hz = 1, *args, **kwargs):
@@ -76,7 +74,7 @@ class GraphWidget(QtWidgets.QWidget):
         self.sample_T_ms = int(1000 / live_freq_hz) 
         self.bus = gSerial()
         self.x = list(range(3000))
-        self.y = [randint(0,100) for _ in range(3000)]
+        self.y = [[randint(0,100) for _ in range(3000)]]
 
         # Setup for required objects ====
         # Browse Button
@@ -97,7 +95,7 @@ class GraphWidget(QtWidgets.QWidget):
         self.y_max = QtWidgets.QLineEdit()
         self.y_max.setFixedWidth(120)
         self.y_max.editingFinished.connect(lambda: self.set_y_range(self.y_max.text(), y_max=True))
-        self.data_line = self.graph.plot(self.x,self.y, pen=Pens.RED.value)
+        self.data_line = [self.graph.plot(self.x,self.y[idx], pen=self.pens[idx]) for idx in range(len(self.y))]
 
         self.y_range = self.graph.getViewBox().viewRange()[0]
 
@@ -105,7 +103,7 @@ class GraphWidget(QtWidgets.QWidget):
         self.graph.showGrid(x=True, y=True)
         #g.setBackground("w")
 
-        # Layout configuration
+        # Layout configuration ====
         self.bar_layout.addWidget(self.browse_btn)
         self.bar_layout.addWidget(self.browse_lbl)
         self.bar_layout.addSpacing(40)
@@ -117,11 +115,16 @@ class GraphWidget(QtWidgets.QWidget):
         self.main_layout.addWidget(self.graph)
         self.main_layout.addLayout(self.bar_layout)
 
+        # The live plot update system ====
+        # capture the live plot update function
+        self.live_plot_update_func = self.default_live_plot_update_func
         # Start a timer function - Need a timer to update graph at certain speed.
         self.timer = QtCore.QTimer()                        # Initialize a timer
         self.timer.setTimerType(QtCore.Qt.PreciseTimer)
         self.timer.setInterval(self.sample_T_ms)  # Set the timer interval
-        if self.bus:
+        if self.bus.is_open:
+            print(f"{self.bus.is_open}")
+            input()
             self.timer.timeout.connect(self.live_plot_update)   # Set timeout behaviour
             self.timer.start()                                  # Start timer
 
@@ -130,9 +133,13 @@ class GraphWidget(QtWidgets.QWidget):
             value: value to set:
             y_max: set y_max if true, else set y_min
         """
-        if not value.isdigit():
-            return
-        
+
+        try:
+            value = float(value) 
+        except ValueError:
+            return 
+
+        print(value)
         # Debug print for testing
         #print(f"setting {"y_max" if y_max else "y_min"} to {value}")
         old_y_range = self.graph.getViewBox().viewRange()[1]
@@ -177,9 +184,6 @@ class GraphWidget(QtWidgets.QWidget):
         """What happens when the mock button is pressed"""
         print("mock pressed")
     
-    def yrange(self):
-        return
-
 
     def rename_graph(self, graph, name: str, col="b", sz="20pt"):
         """A function that renames the graph for easy renaming"""
@@ -224,6 +228,17 @@ class GraphWidget(QtWidgets.QWidget):
 
         return x, out_data.tolist()
 
+    def default_live_plot_update_func(self, raw_data: str) -> list:
+        data = []
+
+        for line in raw_data.split("\n"):
+            if "[DEBUG]" in line or line.strip() == "":
+                continue
+            data.extend([int(x) for x in line.strip().split(",") if x != ""])
+        
+        return data
+
+
     # DONE: Mess with this and allow live plotting!
     # TODO: Generalize this and allow multiple plotting streams!
     def live_plot_update(self):
@@ -236,30 +251,32 @@ class GraphWidget(QtWidgets.QWidget):
         #data = str(self.bus.readline().decode()).strip().split(',')
         raw_data = str(self.bus.read_all().decode()).strip().replace("\r", "")
 
-        data = []
+        data = self.live_plot_update_func(raw_data)
 
-        for line in raw_data.split("\n"):
-            if "DMA" in line or "SOMETHING" in line or line.strip() == "":
-                continue
-            data.extend([int(x) for x in line.strip().split(",") if x != ""])
-
-        if len(data) == 0:
+        if data == None:
             return 
 
         #print(data)
         #print(len(data))
 
         self.x = self.x[len(data):]
-        self.y = self.y[len(data):]
-        #print(len(self.x), len(self.y))
-
         last_x_val = self.x[-1] + 1
-
         self.x.extend(list(range(last_x_val, last_x_val + len(data))))
-        self.y.extend(data)
+
+        for idx, line in enumerate(data):
+
+            if idx >= len(self.y):
+                self.y.append([randint(0,100) for _ in range(3000)])
+                self.data_line.append(self.graph.plot(self.x, self.y[idx], pen=self.pens[idx]))
+
+            self.y[idx] = self.y[idx][len(line):]
+            self.y[idx].extend(line)
+            self.data_line[idx].setData(self.x, self.y[idx])
+
 
         #print(len(self.x), len(self.y))
-        self.data_line.setData(self.x, self.y)
+
+        #print(len(self.x), len(self.y))
 
 class PyChart(QtWidgets.QMainWindow):
     def __init__(self, n_g=1, f_s=20, *args, **kwargs):
@@ -335,15 +352,35 @@ class PyChart(QtWidgets.QMainWindow):
 
         name = f"/tty/ACM0" 
 
-        new_graph_widget = GraphWidget(name=name)
+        new_graph_widget = GraphWidget(name=name, live_freq_hz=20)
         self.graphWidgets.append(new_graph_widget)
         self.graph_layout.addLayout(new_graph_widget.main_layout)
         self.num_graphs += 1
 
+    def set_graph_update_function(self, func: callable, graph_idx: int = 0):
+        self.graphWidgets[graph_idx].live_plot_update_func = func
+
     
 def main():
+
+    def parse_function(raw_data: str):
+        line_items = [] 
+        for line in raw_data.split("\n"):
+            if "[DEBUG]" in line or line.strip() == "":
+                continue
+
+            line_items.append(np.array([[float(z) for z in x.strip().split(",") if z != ""] for x in line.strip().split(";") if x != ""]))
+
+        if len(line_items) > 0:
+            line_items = np.transpose(line_items[0])
+            line_items[0] = np.divide(line_items[0], 255)
+            return line_items.tolist()
+
+        return None
+
     app = QtWidgets.QApplication(sys.argv)
     main = PyChart(f_s= 50, n_g=1)
+    main.set_graph_update_function(parse_function)
     main.show()
     sys.exit(app.exec_())
 

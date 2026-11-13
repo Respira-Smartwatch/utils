@@ -4,6 +4,7 @@ import numpy as np
 import pyqtgraph as pg
 from random import randint
 import serial
+import serial.tools.list_ports as ls_ports
 import sys  # We need sys so that we can pass argv to QApplication
 import os
 
@@ -20,18 +21,18 @@ class Pens(Enum):
        return [p.value for p in Pens]
 
 class gSerial(serial.Serial):
-    def __init__(self, port="/dev/ttyACM0", baudrate=115200, timeout=10, *args, **kwargs):
+    def __init__(self, *args, **kwargs):
         self.accepted_bauds = [9600, 115200]
         try:
-            super().__init__(port=port, baudrate=baudrate, timeout=timeout, *args, **kwargs)
+            super().__init__(*args, **kwargs)
         except serial.SerialException:
-            print(f"Error: Serial Bus {port} Not Present")
+            print(f"Error: Serial Bus {self.port} Not Present")
             if self.connect_serial_cli() is None:
                 print("Continuing without setting up a live connection")
        
     def connect_serial_cli(self)->serial.Serial:
-        print("\n\nWould you like to connect to a bus?")
         while True:
+            print("\n\nWould you like to connect to a bus?")
             ans = input("y/n:")
             if ans.lower() not in ["y", "n"]:
                 print("Please enter 'y' or 'n'")
@@ -39,11 +40,33 @@ class gSerial(serial.Serial):
             elif ans.lower() == "n":
                 return None
             else:
-                ser = input("Enter path to serial bus:")
-                baud = int(input("Enter baud rage:"))
-                if int(baud) not in self.accepted_bauds:
-                    print(f"{baud} is not a value in {accepted_bauds} - using {accepted_bauds[0]}")
-                    baud = self.accepted_bauds[0]
+                avail_busses = ls_ports.comports()
+                bus_string = "\n".join([f"\t[{idx}] : {bus.name}" for idx, bus in enumerate(avail_busses)])
+
+                while True:
+                    ser = input(f"Choose a bus number from the following list:\n{bus_string}\n\nBus: ")
+
+                    if ser.isnumeric() and int(ser) < len(avail_busses):
+                        ser = avail_busses[int(ser)].device
+                        break
+                    else:
+                        print("You must type a number")
+                
+                while True:
+                    baud = input("Enter baud rage:")
+                    if not baud.isnumeric():
+                        print("You must type a number")
+                        continue
+
+                    if int(baud) not in self.accepted_bauds:
+                        print(f"{baud} is not a value in {self.accepted_bauds} - using {self.accepted_bauds[0]}")
+                        baud = self.accepted_bauds[0]
+                        break
+                        
+                    else:
+                        baud = int(baud)
+                        break
+
             try:
                 super().__init__(port=ser, baudrate=baud, timeout=self.timeout)
                 break
@@ -54,12 +77,12 @@ class gSerial(serial.Serial):
                     print("Continuing without a serial bus")
                     return None
                 continue
+
         return self
-    
 
 class GraphWidget(QtWidgets.QWidget):
     """ A class that creates graph view"""
-    def __init__(self, name="none", live_freq_hz = 1, *args, **kwargs):
+    def __init__(self, name="none", live_freq_hz = 1, serial_dev: gSerial=None, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
         # Create required objects ====
@@ -72,7 +95,7 @@ class GraphWidget(QtWidgets.QWidget):
         # Data Info
         self.sample_rate_hz = live_freq_hz
         self.sample_T_ms = int(1000 / live_freq_hz) 
-        self.bus = gSerial()
+        self.bus = serial_dev
         self.x = list(range(3000))
         self.y = [[randint(0,100) for _ in range(3000)]]
 
@@ -123,8 +146,6 @@ class GraphWidget(QtWidgets.QWidget):
         self.timer.setTimerType(QtCore.Qt.PreciseTimer)
         self.timer.setInterval(self.sample_T_ms)  # Set the timer interval
         if self.bus.is_open:
-            print(f"{self.bus.is_open}")
-            input()
             self.timer.timeout.connect(self.live_plot_update)   # Set timeout behaviour
             self.timer.start()                                  # Start timer
 
@@ -352,7 +373,8 @@ class PyChart(QtWidgets.QMainWindow):
 
         name = f"/tty/ACM0" 
 
-        new_graph_widget = GraphWidget(name=name, live_freq_hz=20)
+        new_graph_widget = GraphWidget(name=name, live_freq_hz=20, serial_dev=gSerial(port="ttyACM0", baudrate=115200, timeout=10))
+        print("Created!")
         self.graphWidgets.append(new_graph_widget)
         self.graph_layout.addLayout(new_graph_widget.main_layout)
         self.num_graphs += 1

@@ -1,4 +1,4 @@
-PYTHON = $(HOME)/Envs/respira/bin/python3
+PYTHON = $(HOME)/.virtualenv/respira/bin/python3
 
 ##########################################################################
 #
